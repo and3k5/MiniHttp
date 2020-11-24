@@ -2,7 +2,6 @@
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace And3k5.MiniHttp
 {
@@ -13,12 +12,30 @@ namespace And3k5.MiniHttp
             Handler = handler;
         }
 
+        public int SimultaneouslyHandlers
+        {
+            get => _simultaneouslyHandlers;
+            set
+            {
+                if (value < 1)
+                    throw new Exception("SimultaneouslyHandlers should be at least 1");
+                _simultaneouslyHandlers = value;
+            }
+        }
+
+        public delegate void ClosedResponse();
+
+        public delegate void ReceivedRequest();
+
+        public event ClosedResponse OnClosedResponse;
+        public event ReceivedRequest OnReceivedRequest;
+
         public Action<MiniHttpContext> Handler { get; }
 
         private HttpListener _listener;
-        private Thread _thread;
         private CancellationTokenSource _source;
         private bool _disposed;
+        private int _simultaneouslyHandlers = 1;
 
         public void Listen(int port, char hostChar = '+')
         {
@@ -43,38 +60,38 @@ namespace And3k5.MiniHttp
                 throw new MissingAccessToPortException(uriPrefix, port, ex);
             }
 
-            _thread = new Thread(() =>
+            var iterations = SimultaneouslyHandlers;
+
+
+            for (var i = 0; i < iterations; i++)
             {
-                var _ = ListenerLoop(_source.Token);
-            });
-            _thread.Start();
+                _listener.BeginGetContext(ar => NewContext(_source.Token, ar), null);
+            }
         }
 
-        private async Task ListenerLoop(CancellationToken cancellationToken)
+        private void NewContext(CancellationToken cancellationToken, IAsyncResult asyncResult)
         {
-            while (true)
+            if (_listener == null)
+                return;
+            if (cancellationToken.IsCancellationRequested)
+                return;
+
+
+            var context = _listener.EndGetContext(asyncResult);
+
+            if (cancellationToken.IsCancellationRequested)
             {
-                if (_listener == null)
-                    return;
-                if (cancellationToken.IsCancellationRequested)
-                    return;
-
-                var contextTask = _listener.GetContextAsync();
-                while (!contextTask.Wait(100))
-                {
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        return;
-                    }
-                }
-
-                // Note: The GetContext method blocks while waiting for a request.
-                var context = await contextTask.ConfigureAwait(false);
-
-                Handler(new MiniHttpContext(context));
-
-                context.Response.Close();
+                return;
             }
+
+
+            OnReceivedRequest?.Invoke();
+
+            Handler(new MiniHttpContext(context));
+
+            context.Response.Close();
+            OnClosedResponse?.Invoke();
+            _listener.BeginGetContext(ar => NewContext(cancellationToken, ar), null);
         }
 
         public void Dispose()
