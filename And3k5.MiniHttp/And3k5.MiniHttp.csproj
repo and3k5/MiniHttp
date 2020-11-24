@@ -7,7 +7,7 @@
     <Authors>And3k5</Authors>
     <PackageId>MiniHttp</PackageId>
     <Product>MiniHttp</Product>
-    <Version>0.0.1</Version>
+    <Version>0.0.2</Version>
   </PropertyGroup>
 
   <ItemGroup>
